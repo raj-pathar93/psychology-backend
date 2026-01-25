@@ -1,6 +1,6 @@
-import { Injectable } from "@nestjs/common";
-import { PrismaService } from "../prisma/prisma.service";
-import * as nodemailer from "nodemailer";
+import { Injectable } from '@nestjs/common';
+import { PrismaService } from '../prisma/prisma.service';
+import * as nodemailer from 'nodemailer';
 
 @Injectable()
 export class ContactService {
@@ -12,7 +12,7 @@ export class ContactService {
 
     // 2️⃣ Send Email
     const transporter = nodemailer.createTransport({
-      service: "gmail",
+      service: 'gmail',
       auth: {
         user: process.env.EMAIL_USER,
         pass: process.env.EMAIL_PASS,
@@ -22,7 +22,7 @@ export class ContactService {
     await transporter.sendMail({
       from: `"Manah Vigyan" <${process.env.EMAIL_USER}>`,
       to: process.env.ADMIN_EMAIL,
-      subject: "New Contact Inquiry",
+      subject: 'New Contact Inquiry',
       html: `
         <h3>New Contact Message</h3>
         <p><b>Name:</b> ${data.name}</p>

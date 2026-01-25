@@ -1,7 +1,7 @@
-import { Controller, Post, Body } from "@nestjs/common";
-import { AppointmentService } from "./appointment.service";
+import { Controller, Post, Body } from '@nestjs/common';
+import { AppointmentService } from './appointment.service';
 
-@Controller("appointment")
+@Controller('appointment')
 export class AppointmentController {
   constructor(private service: AppointmentService) {}
 
