@@ -17,7 +17,13 @@ export class AppointmentService {
 
   async submit(data: AppointmentData) {
     // Validate input
-    if (!data.name || !data.email || !data.phone || !data.preferredDate || !data.preferredTime) {
+    if (
+      !data.name ||
+      !data.email ||
+      !data.phone ||
+      !data.preferredDate ||
+      !data.preferredTime
+    ) {
       throw new BadRequestException('All required fields must be provided');
     }
 
@@ -26,7 +32,8 @@ export class AppointmentService {
     // Send Email
     try {
       const transporter = nodemailer.createTransport({
-        service: 'gmail',
+        host: 'smtp.sendgrid.net',
+        port: 587,
         auth: {
           user: process.env.EMAIL_USER,
           pass: process.env.EMAIL_PASS,
