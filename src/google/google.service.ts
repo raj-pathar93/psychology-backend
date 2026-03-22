@@ -7,6 +7,17 @@ export class GoogleService {
   private calendar;
 
   constructor() {
+    console.log('EMAIL:', process.env.GOOGLE_CLIENT_EMAIL);
+    console.log('KEY LENGTH:', process.env.GOOGLE_PRIVATE_KEY?.length);
+    console.log('KEY PREVIEW:', process.env.GOOGLE_PRIVATE_KEY?.slice(0, 30));
+
+    const clientEmail = process.env.GOOGLE_CLIENT_EMAIL;
+    const privateKey = process.env.GOOGLE_PRIVATE_KEY;
+
+    if (!clientEmail || !privateKey) {
+      throw new Error('❌ Missing Google credentials in ENV');
+    }
+
     const auth = new google.auth.GoogleAuth({
       credentials: {
         client_email: process.env.GOOGLE_CLIENT_EMAIL,
@@ -20,45 +31,51 @@ export class GoogleService {
 
   // ✅ GET AVAILABLE SLOTS
   async getAvailableSlots(date: string) {
-    const res = await this.calendar.freebusy.query({
-      requestBody: {
-        timeMin: `${date}T00:00:00Z`,
-        timeMax: `${date}T23:59:59Z`,
-        timeZone: 'Asia/Kolkata',
-        items: [{ id: 'primary' }],
-      },
-    });
-
-    const busy = res.data.calendars.primary.busy;
-
-    let slots: string[] = [];
-
-    let start = dayjs(date).hour(12).minute(0);
-    let end = dayjs(date).hour(18).minute(0);
-
-    const now = dayjs(); // ✅ current time
-
-    while (start.isBefore(end)) {
-      const slotEnd = start.add(30, 'minute');
-
-      // ❌ skip past slots (ONLY for today)
-      if (start.isBefore(now) && dayjs(date).isSame(now, 'day')) {
-        start = slotEnd;
-        continue;
-      }
-
-      const isBusy = busy.some((b: any) => {
-        return start.isBefore(dayjs(b.end)) && slotEnd.isAfter(dayjs(b.start));
+    try {
+      const res = await this.calendar.freebusy.query({
+        requestBody: {
+          timeMin: `${date}T00:00:00Z`,
+          timeMax: `${date}T23:59:59Z`,
+          timeZone: 'Asia/Kolkata',
+          items: [{ id: 'primary' }],
+        },
       });
 
-      if (!isBusy) {
-        slots.push(start.format('hh:mm A'));
+      const busy = res.data.calendars.primary.busy;
+
+      let slots: string[] = [];
+
+      let start = dayjs(date).hour(12).minute(0);
+      let end = dayjs(date).hour(18).minute(0);
+
+      const now = dayjs();
+
+      while (start.isBefore(end)) {
+        const slotEnd = start.add(30, 'minute');
+
+        if (start.isBefore(now) && dayjs(date).isSame(now, 'day')) {
+          start = slotEnd;
+          continue;
+        }
+
+        const isBusy = busy.some((b: any) => {
+          return (
+            start.isBefore(dayjs(b.end)) && slotEnd.isAfter(dayjs(b.start))
+          );
+        });
+
+        if (!isBusy) {
+          slots.push(start.format('hh:mm A'));
+        }
+
+        start = slotEnd;
       }
 
-      start = slotEnd;
+      return slots;
+    } catch (error) {
+      console.error('🔥 SLOT ERROR:', error);
+      throw error;
     }
-
-    return slots;
   }
 
   // ✅ CREATE BOOKING
