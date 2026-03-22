@@ -13,8 +13,7 @@ async function bootstrap() {
   await app.listen(port);
   console.log(`✅ Server is now listening on http://localhost:${port}!`);
 }
-bootstrap().catch(err => {
+bootstrap().catch((err: any) => {
   console.error('❌ Failed to start server:', err);
   process.exit(1);
 });
-
