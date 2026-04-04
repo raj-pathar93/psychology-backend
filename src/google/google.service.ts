@@ -1,16 +1,27 @@
 import { Injectable } from '@nestjs/common';
 import { google } from 'googleapis';
+import { calendar_v3 } from 'googleapis';
 import dayjs from 'dayjs';
+import utc from 'dayjs/plugin/utc';
+import timezone from 'dayjs/plugin/timezone';
+import isBetween from 'dayjs/plugin/isBetween';
+
+dayjs.extend(utc);
+dayjs.extend(timezone);
+dayjs.extend(isBetween);
+
+const TZ = 'Asia/Kolkata';
+
+export interface Slot {
+  time: string; // "12:00 PM"
+  isBooked: boolean;
+}
 
 @Injectable()
 export class GoogleService {
-  private calendar;
+  private calendar: calendar_v3.Calendar;
 
   constructor() {
-    console.log('EMAIL:', process.env.GOOGLE_CLIENT_EMAIL);
-    console.log('KEY LENGTH:', process.env.GOOGLE_PRIVATE_KEY?.length);
-    console.log('KEY PREVIEW:', process.env.GOOGLE_PRIVATE_KEY?.slice(0, 30));
-
     const clientEmail = process.env.GOOGLE_CLIENT_EMAIL;
     const privateKey = process.env.GOOGLE_PRIVATE_KEY;
 
@@ -20,8 +31,8 @@ export class GoogleService {
 
     const auth = new google.auth.GoogleAuth({
       credentials: {
-        client_email: process.env.GOOGLE_CLIENT_EMAIL,
-        private_key: process.env.GOOGLE_PRIVATE_KEY?.replace(/\\n/g, '\n'),
+        client_email: clientEmail,
+        private_key: privateKey.replace(/\\n/g, '\n'),
       },
       scopes: ['https://www.googleapis.com/auth/calendar'],
     });
@@ -29,46 +40,55 @@ export class GoogleService {
     this.calendar = google.calendar({ version: 'v3', auth });
   }
 
-  // ✅ GET AVAILABLE SLOTS
-  async getAvailableSlots(date: string) {
+  async getAvailableSlots(date: string): Promise<Slot[]> {
     try {
+      // Use IST midnight boundaries, converted to UTC for the API
+      const dayStart = dayjs.tz(`${date}T00:00:00`, TZ).toISOString();
+      const dayEnd = dayjs.tz(`${date}T23:59:59`, TZ).toISOString();
+
       const res = await this.calendar.freebusy.query({
         requestBody: {
-          timeMin: `${date}T00:00:00Z`,
-          timeMax: `${date}T23:59:59Z`,
-          timeZone: 'Asia/Kolkata',
+          timeMin: dayStart,
+          timeMax: dayEnd,
+          timeZone: TZ,
           items: [{ id: 'primary' }],
         },
       });
 
-      const busy = res.data.calendars.primary.busy;
+      const busy = res?.data?.calendars?.primary.busy ?? [];
 
-      let slots: string[] = [];
+      const slots: Slot[] = [];
+      const now = dayjs().tz(TZ);
 
-      let start = dayjs(date).hour(12).minute(0);
-      let end = dayjs(date).hour(18).minute(0);
+      // Build slots in IST
+      let cursor = dayjs.tz(`${date}T12:00:00`, TZ);
+      const windowEnd = dayjs.tz(`${date}T18:00:00`, TZ);
 
-      const now = dayjs();
+      while (cursor.isBefore(windowEnd)) {
+        const slotEnd = cursor.add(30, 'minute');
 
-      while (start.isBefore(end)) {
-        const slotEnd = start.add(30, 'minute');
+        // Skip slots already in the past (today only)
+        const isPast =
+          cursor.isBefore(now) && dayjs.tz(date, TZ).isSame(now, 'day');
 
-        if (start.isBefore(now) && dayjs(date).isSame(now, 'day')) {
-          start = slotEnd;
-          continue;
+        if (!isPast) {
+          // Compare in UTC — both sides are now proper UTC strings
+          const isBooked = busy.some((b) => {
+            const busyStart = dayjs(b.start).utc(); // ← convert to UTC
+            const busyEnd = dayjs(b.end).utc(); // ← convert to UTC
+            const slotStart = cursor.utc(); // ← convert to UTC
+            const slotEnd2 = slotEnd.utc(); // ← convert to UTC
+
+            return slotStart.isBefore(busyEnd) && slotEnd2.isAfter(busyStart);
+          });
+
+          slots.push({
+            time: cursor.format('HH:mm'), // → "13:00" instead of "01:00 PM"
+            isBooked,
+          });
         }
 
-        const isBusy = busy.some((b: any) => {
-          return (
-            start.isBefore(dayjs(b.end)) && slotEnd.isAfter(dayjs(b.start))
-          );
-        });
-
-        if (!isBusy) {
-          slots.push(start.format('hh:mm A'));
-        }
-
-        start = slotEnd;
+        cursor = slotEnd;
       }
 
       return slots;
@@ -78,38 +98,46 @@ export class GoogleService {
     }
   }
 
-  // ✅ CREATE BOOKING
-  async createBooking(data: any) {
+  async createBooking(data: {
+    date: string;
+    time: string;
+    email: string;
+    name: string;
+  }) {
     const { date, time, email, name } = data;
 
-    const start = dayjs(`${date} ${time}`);
+    const [timePart, meridiem] = time.split(' '); // "01:00", "PM"
+    const [hours, minutes] = timePart.split(':').map(Number);
+
+    let hours24 = hours;
+    if (meridiem === 'PM' && hours !== 12) hours24 = hours + 12;
+    if (meridiem === 'AM' && hours === 12) hours24 = 0;
+
+    const start = dayjs.tz(
+      `${date}T${String(hours24).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:00`,
+      TZ,
+    );
     const end = start.add(30, 'minute');
 
     const event = {
       summary: `Session with ${name}`,
-      start: {
-        dateTime: start.toISOString(),
-        timeZone: 'Asia/Kolkata',
-      },
-      end: {
-        dateTime: end.toISOString(),
-        timeZone: 'Asia/Kolkata',
-      },
-      attendees: [{ email }],
-      conferenceData: {
-        createRequest: {
-          requestId: Date.now().toString(),
-          conferenceSolutionKey: { type: 'hangoutsMeet' },
-        },
-      },
+      description: `Client: ${name}\nEmail: ${email}`,
+      start: { dateTime: start.toISOString(), timeZone: TZ },
+      end: { dateTime: end.toISOString(), timeZone: TZ },
+      // conferenceData removed — service accounts can't create Meet links
     };
 
     const res = await this.calendar.events.insert({
       calendarId: 'primary',
       requestBody: event,
-      conferenceDataVersion: 1,
+      // conferenceDataVersion removed
     });
 
-    return res.data;
+    return {
+      success: true,
+      eventId: res.data.id,
+      start: res.data.start?.dateTime,
+      end: res.data.end?.dateTime,
+    };
   }
 }
