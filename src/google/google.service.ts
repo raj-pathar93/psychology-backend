@@ -83,7 +83,7 @@ export class GoogleService {
           });
 
           slots.push({
-            time: cursor.format('HH:mm'), // → "13:00" instead of "01:00 PM"
+            time: cursor.format('HH:mm'),
             isBooked,
           });
         }
